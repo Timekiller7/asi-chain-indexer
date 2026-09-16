@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from src.alerts import AlertEvent, AlertKind, AlertService
 from src.config import settings
 from src.monitoring import MonitoringServer
-from src.rust_indexer import RustBlockIndexer
+from src.block_indexer import BlockIndexer
 
 # Load environment variables
 load_dotenv()
@@ -50,7 +50,7 @@ class IndexerService:
     """Main service orchestrator."""
 
     def __init__(self):
-        self.indexer: Optional[RustBlockIndexer] = None
+        self.indexer: Optional[BlockIndexer] = None
         self.monitoring: Optional[MonitoringServer] = None
         self.alerts: Optional[AlertService] = None
         self.shutdown_event = asyncio.Event()
@@ -87,8 +87,7 @@ class IndexerService:
 
         self.alerts = AlertService(settings)
 
-        # Create enhanced rust indexer
-        self.indexer = RustBlockIndexer(alerts=self.alerts)
+        self.indexer = BlockIndexer(alerts=self.alerts)
 
         # Create monitoring server
         if settings.enable_health_check or settings.enable_metrics:

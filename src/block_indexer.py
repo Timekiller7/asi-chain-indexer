@@ -45,7 +45,7 @@ def classify_failure(error: Exception) -> Optional[AlertKind]:
     return None
 
 
-class RustBlockIndexer:
+class BlockIndexer:
     """Enhanced indexer using the node gRPC/HTTP API for full blockchain data extraction."""
 
     # Pattern for extracting ASI transfers from Rholang terms

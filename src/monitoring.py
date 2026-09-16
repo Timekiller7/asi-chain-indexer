@@ -151,11 +151,9 @@ class MonitoringServer:
             client = self._client()
             # Try to get last finalized block as health check
             last_block = await client.get_last_finalized_block() if client else None
-            checks["node_client"] = last_block is not None
             checks["rchain_node"] = last_block is not None
         except Exception as e:
             logger.error("Node health check failed", error=str(e))
-            checks["node_client"] = False
             checks["rchain_node"] = False
 
         # Overall status

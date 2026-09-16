@@ -52,7 +52,6 @@ Readiness check that verifies all dependencies.
   "ready": true,
   "checks": {
     "database": true,
-    "rust_cli": true,
     "rchain_node": true
   },
   "timestamp": "2025-08-06T08:11:29.504095"
@@ -67,7 +66,7 @@ Detailed status information about the indexer.
 {
   "indexer": {
     "version": "2.0.0",
-    "indexer_type": "rust_cli",
+    "indexer_type": "grpc",
     "running": true,
     "last_indexed_block": 240,
     "last_sync_time": "2025-08-06T08:10:11.052104",
@@ -86,11 +85,10 @@ Detailed status information about the indexer.
     "total_network_stats": 0,
     "genesis_bonds_extracted": 4
   },
-  "cli": {
-    "binary_path": "/usr/local/bin/node_cli",
-    "version": "0.1.0",
-    "commands_executed": 1450,
-    "command_errors": 0
+  "client": {
+    "node_host": "host.docker.internal",
+    "grpc_port": 40452,
+    "http_port": 40453
   },
   "node": {
     "connected": true,
@@ -114,15 +112,11 @@ Prometheus-compatible metrics endpoint.
 **Response:** Text format metrics including:
 - `indexer_blocks_indexed_total`
 - `indexer_deployments_indexed_total`
-- `indexer_deployment_errors_total`
 - `indexer_transfers_extracted_total`
 - `indexer_sync_lag_blocks`
 - `indexer_last_block_height`
-- `indexer_cli_commands_total{command="..."}`
-- `indexer_cli_errors_total{command="...",error_type="..."}`
-- `indexer_cli_command_duration_seconds{command="..."}`
-- `indexer_epoch_transitions_total`
-- `indexer_network_health_score`
+- `indexer_sync_duration_seconds`
+- `indexer_node_request_duration_seconds`
 - `process_resident_memory_bytes`
 - `process_cpu_seconds_total`
 
@@ -455,7 +449,6 @@ Get comprehensive network statistics.
   },
   "sync": {
     "started_from_block": 0,
-    "using_rust_cli": true,
     "sync_complete": true
   },
   "timestamp": "2025-08-06T09:18:12.284108"
@@ -553,4 +546,4 @@ See `GRAPHQL_GUIDE.md` for comprehensive examples.
 - ✅ GraphQL API with Hasura integration
 - ✅ Support for 150-char addresses (validators and ASI)
 - ✅ 10 comprehensive database tables
-- ✅ Integrated Rust CLI for full blockchain access
+- ✅ Direct gRPC access to the node (`DeployServiceV1`) for full blockchain data
