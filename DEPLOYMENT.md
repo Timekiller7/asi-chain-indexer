@@ -465,6 +465,38 @@ groups:
           summary: "Network consensus unhealthy"
 ```
 
+### Mattermost Alerts (built-in)
+
+The indexer also ships its own alerting path: it posts
+directly to a Mattermost incoming webhook when the sync loop detects failures a
+human should look at (node/database unreachable, sync stalled, chain reorg,
+cursor stuck, sync falling behind, indexer stopped). Repeats of the same alert
+kind inside `ALERT_THROTTLE_SEC` are collapsed into a single message with a
+suppressed count.
+
+Enable it with:
+
+```bash
+ALERTS_ENABLED=true
+MATTERMOST_WEBHOOK_URL=https://mattermost.example.com/hooks/xxxxxxxx
+MATTERMOST_CHANNEL=  # optional, overrides the webhook's default channel
+ALERT_ENVIRONMENT=devnet  # shown in the alert title
+```
+
+Detection thresholds are configurable per deployment, since what counts as
+"falling behind" or "stuck" differs by network:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SYNC_STALL_THRESHOLD` | `3` | Consecutive failed sync cycles before the loop is considered stalled |
+| `LAG_ALERT_BLOCKS` | `500` | Lag depth (in blocks) that counts as falling behind, not a backlog being worked through |
+| `LAG_ALERT_CYCLES` | `60` | Cycles the lag must stay deeper than `LAG_ALERT_BLOCKS` without shrinking before alerting |
+| `LAG_RECOVERY_RATIO` | `0.9` | Lag counts as recovering when the recent half of the window is at most this fraction of the older half; lower values demand faster catch-up |
+| `CURSOR_STUCK_CYCLES` | `3` | Cycles the sync cursor may retry the same block before that stops looking transient |
+
+See `.env.example` for the full list of alert-related variables, including
+`ALERT_THROTTLE_SEC` and `ALERT_TIMEOUT_SEC`.
+
 ## Backup and Recovery
 
 ### Automated Backups

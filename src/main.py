@@ -8,6 +8,7 @@ import click
 import structlog
 from dotenv import load_dotenv
 
+from src.alerts import AlertEvent, AlertKind, AlertService
 from src.config import settings
 from src.monitoring import MonitoringServer
 from src.rust_indexer import RustBlockIndexer
@@ -51,7 +52,9 @@ class IndexerService:
     def __init__(self):
         self.indexer: Optional[RustBlockIndexer] = None
         self.monitoring: Optional[MonitoringServer] = None
+        self.alerts: Optional[AlertService] = None
         self.shutdown_event = asyncio.Event()
+        self._indexer_died = False
 
     async def start(self):
         """Start all services."""
@@ -82,8 +85,10 @@ class IndexerService:
             console="http://localhost:8080/console"
         )
 
+        self.alerts = AlertService(settings)
+
         # Create enhanced rust indexer
-        self.indexer = RustBlockIndexer()
+        self.indexer = RustBlockIndexer(alerts=self.alerts)
 
         # Create monitoring server
         if settings.enable_health_check or settings.enable_metrics:
@@ -92,9 +97,12 @@ class IndexerService:
 
         # Start indexer
         indexer_task = asyncio.create_task(self.indexer.start())
+        indexer_task.add_done_callback(self._on_indexer_task_done)
 
         # Wait for shutdown signal
         await self.shutdown_event.wait()
+
+        await self._alert_if_indexer_died(indexer_task)
 
         # Stop services
         await self.stop()
@@ -105,6 +113,35 @@ class IndexerService:
             await indexer_task
         except asyncio.CancelledError:
             pass
+        except Exception:
+            pass  # already reported by _alert_if_indexer_died
+
+    def _on_indexer_task_done(self, task: asyncio.Task):
+        """Notice a sync loop that ended on its own.
+
+        Nothing else observes this task, so without it a crashed loop leaves the
+        process up and the health endpoint still reporting healthy.
+        """
+        if self.shutdown_event.is_set():
+            return
+
+        self._indexer_died = True
+        self.shutdown_event.set()
+
+    async def _alert_if_indexer_died(self, task: asyncio.Task):
+        """Report an unrequested exit, then let the process go so the container's
+        restart policy can bring it back."""
+        if not self._indexer_died:
+            return
+
+        error = None if task.cancelled() else task.exception()
+        logger.error("Indexer stopped unexpectedly", error=str(error) if error else None)
+        await self.alerts.notify_and_wait(
+            AlertEvent(
+                AlertKind.INDEXER_STOPPED,
+                str(error) if error else "sync loop exited"
+            )
+        )
 
     async def stop(self):
         """Stop all services."""
@@ -159,6 +196,12 @@ def main(reset: bool, start_from: Optional[int]):
         sys.exit(0)
     except Exception as e:
         logger.error(f"Fatal error: {e}")
+        # the loop that ran the service is gone; a fresh one delivers the last word
+        asyncio.run(
+            AlertService(settings).notify_and_wait(
+                AlertEvent(AlertKind.INDEXER_STOPPED, str(e))
+            )
+        )
         sys.exit(1)
 
 
