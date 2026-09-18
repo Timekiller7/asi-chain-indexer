@@ -219,9 +219,12 @@ def main(reset: bool, start_from: Optional[int]):
         sys.exit(1)
     except Exception as e:
         logger.error(f"Fatal error: {e}")
-        # the loop that ran the service is gone; a fresh one delivers the last word
+        # the loop that ran the service is gone; a fresh one delivers the last word.
+        # Same throttle store as the service, so a crash loop is throttled here too;
+        # store calls are bounded and best-effort, so a dead database cannot hold
+        # up the exit
         asyncio.run(
-            AlertService(settings).notify_and_wait(
+            AlertService(settings, store=db).notify_and_wait(
                 AlertEvent(AlertKind.INDEXER_STOPPED, describe_error(e))
             )
         )
