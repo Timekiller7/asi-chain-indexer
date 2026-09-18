@@ -490,7 +490,7 @@ What triggers each alert (a "cycle" is one pass of the sync loop, every
 | Sync stalled | Any other error fails `SYNC_STALL_THRESHOLD` consecutive cycles. A refused database connection that the driver raises as a plain socket error lands here too |
 | Block sync stuck | The sync cursor retries the same failing block for `CURSOR_STUCK_CYCLES` cycles |
 | Sync falling behind | Lag stays above `LAG_ALERT_BLOCKS` for a full window of `LAG_ALERT_CYCLES` cycles without shrinking by `LAG_RECOVERY_RATIO` |
-| Chain reorg detected | A stored height does not contain the node's canonical hash for that height (checked when the cursor sits on a multiple of 500) |
+| Chain reorg detected | A stored height does not contain the node's canonical hash for that height (checked at startup, then every 500 indexed blocks) |
 | Indexer stopped | The sync loop exits or crashes for a reason that was not already alerted on |
 
 A single failed cycle is never alerted on by itself. A cycle counts as failed

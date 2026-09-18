@@ -45,6 +45,9 @@ def classify_failure(error: Exception) -> Optional[AlertKind]:
 class BlockIndexer:
     """Enhanced indexer using the node gRPC/HTTP API for full blockchain data extraction."""
 
+    # Indexed blocks between main-chain (reorg) verifications
+    MAIN_CHAIN_CHECK_INTERVAL = 500
+
     # Pattern for extracting ASI transfers from Rholang terms
     TRANSFER_PATTERNS = [
         # Standard AsiVault transfer pattern with literal address: @vault!("transfer", "address", amount,
@@ -92,6 +95,8 @@ class BlockIndexer:
         self.running = False
         self.last_epoch_check_block = 0
         self.last_consensus_check_block = 0
+        # None until the first verification, so a restart verifies straight away
+        self._last_verified_block: Optional[int] = None
         self._genesis_data_cache = None  # Cache genesis data to avoid multiple extractions
         self.alerts = alerts if alerts is not None else AlertService.disabled()
         self._consecutive_failures = 0
@@ -904,9 +909,12 @@ class BlockIndexer:
         among the hashes stored there. A height with no rows is not indexed yet.
         """
         try:
-            # Only verify when the cursor sits on a multiple of 500
+            # A distance, not a multiple: the cursor advances in BATCH_SIZE steps
+            # and can jump over any given multiple
             current_block = await db.get_last_indexed_block()
-            if current_block % 500 != 0:
+            if (self._last_verified_block is not None
+                    and current_block - self._last_verified_block
+                    < self.MAIN_CHAIN_CHECK_INTERVAL):
                 return
 
             main_chain = await self.client.show_main_chain(depth=20)
@@ -921,6 +929,7 @@ class BlockIndexer:
                     canonical.append((block_num, block_hash))
             if not canonical:
                 logger.debug("Main chain verification skipped, nothing indexed in range")
+                self._last_verified_block = current_block
                 return
 
             async with db.session() as session:
@@ -956,6 +965,7 @@ class BlockIndexer:
                     .with_context("expected_hashes", ", ".join(shown))
                 )
 
+            self._last_verified_block = current_block
             logger.info("Main chain verification complete", blocks_checked=len(canonical))
 
         except Exception as e:
