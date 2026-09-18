@@ -37,9 +37,27 @@ def classify_failure(error: Exception) -> Optional[AlertKind]:
     """
     if isinstance(error, (grpc.RpcError, aiohttp.ClientError)):
         return AlertKind.NODE_UNREACHABLE
-    if isinstance(error, (asyncpg.PostgresError, OperationalError, InterfaceError)):
+    # asyncpg.PostgresError already covers PostgresConnectionError and
+    # ConnectionDoesNotExistError
+    if isinstance(error, (asyncpg.PostgresError, asyncpg.InterfaceError,
+                          OperationalError, InterfaceError)):
+        return AlertKind.DATABASE_UNREACHABLE
+    # Failing to reach Postgres at all (refused, DNS, connect timeout, or "Multiple
+    # exceptions" when every address fails) surfaces as a plain OSError that neither
+    # asyncpg nor SQLAlchemy wraps. Only those raised inside the driver count: a bare
+    # OSError could be anything, and asyncio.TimeoutError is one too.
+    if isinstance(error, OSError) and _raised_in_database_driver(error):
         return AlertKind.DATABASE_UNREACHABLE
     return None
+
+
+def _raised_in_database_driver(error: BaseException) -> bool:
+    tb = error.__traceback__
+    while tb is not None:
+        if tb.tb_frame.f_globals.get("__name__", "").startswith("asyncpg"):
+            return True
+        tb = tb.tb_next
+    return False
 
 
 class BlockIndexer:
