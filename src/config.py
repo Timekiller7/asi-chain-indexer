@@ -113,6 +113,11 @@ class Settings(BaseSettings):
         default=3,
         description="Consecutive failed sync cycles before the loop is considered stalled"
     )
+    node_unreachable_cycles: int = Field(
+        default=3,
+        description="Consecutive sync cycles the node may return no data (no last "
+                    "finalized block, or no blocks for a non-empty range) before alerting"
+    )
     lag_alert_blocks: int = Field(
         default=500,
         description="Lag depth (in blocks) that, held for lag_alert_cycles without net "

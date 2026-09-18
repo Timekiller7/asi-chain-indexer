@@ -11,7 +11,7 @@ import aiohttp
 import asyncpg
 import grpc
 import structlog
-from sqlalchemy import select, text, and_
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -99,6 +99,7 @@ class BlockIndexer:
         self.alerts = alerts if alerts is not None else AlertService.disabled()
         self._consecutive_failures = 0
         self._cycle_error: Optional[Exception] = None
+        self._node_unavailable_cycles = 0
         self._lag_history: List[int] = []
         self._stuck_height: Optional[int] = None
         self._stuck_cycles = 0
@@ -189,6 +190,49 @@ class BlockIndexer:
 
         self._cycle_error = error
 
+    def _close_cycle(self):
+        """Count the cycle against the stall threshold and alert once it is reached.
+
+        Runs outside the loop's `try`, so it must never raise: an escaped exception
+        here would kill the sync task.
+        """
+        try:
+            if self._cycle_error is None:
+                self._consecutive_failures = 0
+                return
+
+            self._consecutive_failures += 1
+            if self._consecutive_failures < settings.sync_stall_threshold:
+                return
+
+            self.alerts.notify(
+                AlertEvent(AlertKind.SYNC_STALLED, str(self._cycle_error))
+                .with_context("consecutive_failures", self._consecutive_failures)
+            )
+        except Exception as e:
+            logger.error("Failed to close sync cycle", error=str(e), exc_info=True)
+
+    def _track_node_availability(self, available: bool, error: str = ""):
+        """Alert when the node keeps coming back empty at runtime.
+
+        The node client swallows RPC errors and returns None / [] instead, so an
+        outage after startup never reaches `classify_failure`. Counting empty
+        results over consecutive cycles is what surfaces it.
+        """
+        if available:
+            self._node_unavailable_cycles = 0
+            return
+
+        self._node_unavailable_cycles += 1
+        if self._node_unavailable_cycles < settings.node_unreachable_cycles:
+            return
+
+        self.alerts.notify(
+            AlertEvent(AlertKind.NODE_UNREACHABLE, error)
+            .with_context("node", f"{settings.node_host}:{settings.grpc_port}")
+            .with_context("cycles", self._node_unavailable_cycles)
+        )
+
     def _track_cursor(self, completed_height: int, end: int, failures: int,
                       error: Optional[str]):
         """Alert when the sync cursor stops advancing.
@@ -264,17 +308,20 @@ class BlockIndexer:
             last_finalized_data = await self.client.get_last_finalized_block()
             if not last_finalized_data:
                 logger.warning("Could not get last finalized block")
+                self._track_node_availability(False, "could not get last finalized block")
                 return
 
             latest_block_number = last_finalized_data.get("blockNumber")
             if latest_block_number is None:
                 logger.warning("No block number in finalized block data")
+                self._track_node_availability(False, "could not get latest block number")
                 return
 
             self._track_lag(max(0, latest_block_number - last_indexed))
 
             if last_indexed >= latest_block_number:
                 logger.debug("Already up to date", last_indexed=last_indexed, latest=latest_block_number)
+                self._track_node_availability(True)
                 return
 
             # Check whether the database is fresh. A fresh database starts at
@@ -304,7 +351,13 @@ class BlockIndexer:
 
             if not block_summaries:
                 logger.warning("No blocks returned for range", start=start, end=end)
+                # an empty range (start_from_block above the finalized tip) is not an outage
+                self._track_node_availability(
+                    end < start, f"no blocks returned for heights {start}-{end}"
+                )
                 return
+
+            self._track_node_availability(True)
 
             logger.info(f"Retrieved {len(block_summaries)} blocks, fetching details...")
 
@@ -844,55 +897,67 @@ class BlockIndexer:
             self._record_cycle_failure(e)
 
     async def _verify_main_chain(self):
-        """Periodically verify main chain integrity."""
+        """Periodically verify main chain integrity.
+
+        The node's main chain runs past what is indexed (unfinalized tip, sync lag),
+        so only heights at or below the cursor are compared. A height can hold
+        several DAG siblings: a reorg is a stored height whose canonical hash is not
+        among the hashes stored there. A height with no rows is not indexed yet.
+        """
         try:
-            # Only verify every 500 blocks
+            # Only verify when the cursor sits on a multiple of 500
             current_block = await db.get_last_indexed_block()
             if current_block % 500 != 0:
                 return
-
-            # Get recent main chain blocks
 
             main_chain = await self.client.show_main_chain(depth=20)
             if not main_chain:
                 return
 
-            # Verify we have these blocks and they match
+            canonical = []
+            for block_info in main_chain:
+                block_num = block_info.get("blockNumber")
+                block_hash = block_info.get("blockHash")
+                if block_num is not None and block_hash and block_num <= current_block:
+                    canonical.append((block_num, block_hash))
+            if not canonical:
+                logger.debug("Main chain verification skipped, nothing indexed in range")
+                return
+
             async with db.session() as session:
-                for block_info in main_chain:
-                    block_num = block_info.get("blockNumber")
-                    block_hash = block_info.get("blockHash")
-
-                    if block_num is None or not block_hash:
-                        continue
-
-                    # Check if we have this block with matching hash
-                    stored_block = await session.scalar(
-                        select(Block).where(
-                            and_(
-                                Block.block_number == block_num,
-                                Block.block_hash == block_hash
-                            )
-                        ).limit(1)
+                rows = await session.execute(
+                    select(Block.block_number, Block.block_hash).where(
+                        Block.block_number.in_({block_num for block_num, _ in canonical})
                     )
+                )
+                stored: Dict[int, set] = {}
+                for block_num, block_hash in rows:
+                    stored.setdefault(block_num, set()).add(block_hash)
 
-                    if not stored_block:
-                        logger.warning(
-                            "Main chain mismatch detected",
-                            block_number=block_num,
-                            expected_hash=block_hash
-                        )
-                        self.alerts.notify(
-                            AlertEvent(
-                                AlertKind.CHAIN_REORG_DETECTED,
-                                "stored block hash does not match canonical chain"
-                            )
-                            .with_context("block_number", block_num)
-                            .with_context("expected_hash", block_hash)
-                        )
-                        # Could trigger a re-sync here if needed
+            mismatches = sorted(
+                (block_num, block_hash) for block_num, block_hash in canonical
+                if block_num in stored and block_hash not in stored[block_num]
+            )
 
-            logger.info("Main chain verification complete", blocks_checked=len(main_chain))
+            if mismatches:
+                logger.warning(
+                    "Main chain mismatch detected",
+                    heights=[block_num for block_num, _ in mismatches],
+                    expected_hashes=[block_hash for _, block_hash in mismatches],
+                )
+                shown = [block_hash for _, block_hash in mismatches[:3]]
+                if len(mismatches) > len(shown):
+                    shown.append(f"+{len(mismatches) - len(shown)} more")
+                self.alerts.notify(
+                    AlertEvent(
+                        AlertKind.CHAIN_REORG_DETECTED,
+                        "stored blocks do not include the canonical hash at their height"
+                    )
+                    .with_context("heights", ", ".join(str(n) for n, _ in mismatches))
+                    .with_context("expected_hashes", ", ".join(shown))
+                )
+
+            logger.info("Main chain verification complete", blocks_checked=len(canonical))
 
         except Exception as e:
             logger.error(f"Failed to verify main chain: {e}")

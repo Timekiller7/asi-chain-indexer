@@ -489,6 +489,7 @@ Detection thresholds are configurable per deployment, since what counts as
 | Variable | Default | Meaning |
 |---|---|---|
 | `SYNC_STALL_THRESHOLD` | `3` | Consecutive failed sync cycles before the loop is considered stalled |
+| `NODE_UNREACHABLE_CYCLES` | `3` | Consecutive sync cycles the node may return no data (no last finalized block, or no blocks for a non-empty range) before alerting that it is unreachable |
 | `LAG_ALERT_BLOCKS` | `500` | Lag depth (in blocks) that counts as falling behind, not a backlog being worked through |
 | `LAG_ALERT_CYCLES` | `60` | Cycles the lag must stay deeper than `LAG_ALERT_BLOCKS` without shrinking before alerting |
 | `LAG_RECOVERY_RATIO` | `0.9` | Lag counts as recovering when the recent half of the window is at most this fraction of the older half; lower values demand faster catch-up |
