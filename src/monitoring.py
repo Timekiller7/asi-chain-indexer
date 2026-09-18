@@ -134,8 +134,11 @@ class MonitoringServer:
 
     async def readiness_check(self, request):
         """Readiness check - verifies all dependencies are available."""
+        # "rchain_node" is a deprecated alias of "node", kept for one release after
+        # the rename; drop it in the next release (see CHANGELOG, Deprecated)
         checks = {
             "database": False,
+            "node": False,
             "rchain_node": False
         }
 
@@ -151,13 +154,15 @@ class MonitoringServer:
             client = self._client()
             # Try to get last finalized block as health check
             last_block = await client.get_last_finalized_block() if client else None
-            checks["rchain_node"] = last_block is not None
+            node_ok = last_block is not None
         except Exception as e:
             logger.error("Node health check failed", error=str(e))
-            checks["rchain_node"] = False
+            node_ok = False
+        checks["node"] = checks["rchain_node"] = node_ok
 
-        # Overall status
-        all_healthy = all(checks.values())
+        # Overall status, judged on the canonical keys only so the alias can
+        # never decide readiness by itself
+        all_healthy = checks["database"] and checks["node"]
         status_code = 200 if all_healthy else 503
 
         return web.json_response({
