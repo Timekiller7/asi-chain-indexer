@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import aiohttp
 import structlog
+from pydantic import SecretStr
 
 logger = structlog.get_logger(__name__)
 
@@ -70,7 +71,7 @@ class _ThrottleState:
 @dataclass(frozen=True)
 class _DisabledConfig:
     alerts_enabled: bool = False
-    mattermost_webhook_url: Optional[str] = None
+    mattermost_webhook_url: Optional[SecretStr] = None
     mattermost_channel: Optional[str] = None
     mattermost_username: str = SERVICE_NAME
     alert_throttle_sec: int = 3600
@@ -82,7 +83,8 @@ class AlertService:
     """Posts short, throttled failure notices to a Mattermost incoming webhook."""
 
     def __init__(self, config):
-        self.webhook_url: Optional[str] = config.mattermost_webhook_url or None
+        webhook = config.mattermost_webhook_url
+        self.webhook_url: Optional[str] = (webhook.get_secret_value() if webhook else None) or None
         self.enabled: bool = bool(config.alerts_enabled and self.webhook_url)
         self.channel: Optional[str] = config.mattermost_channel or None
         self.username: Optional[str] = config.mattermost_username or None

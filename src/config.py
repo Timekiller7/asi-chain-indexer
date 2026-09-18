@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from pydantic import Field
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -84,7 +84,7 @@ class Settings(BaseSettings):
         default=False,
         description="Enable Mattermost alerts (requires MATTERMOST_WEBHOOK_URL)"
     )
-    mattermost_webhook_url: Optional[str] = Field(
+    mattermost_webhook_url: Optional[SecretStr] = Field(
         default=None,
         description="Mattermost incoming webhook URL (secret, never logged)"
     )
@@ -98,11 +98,13 @@ class Settings(BaseSettings):
     )
     alert_throttle_sec: int = Field(
         default=3600,
+        ge=0,
         description="Per-alert-kind throttle window in seconds; repeats inside it are "
                     "collapsed into a suppressed count"
     )
     alert_timeout_sec: int = Field(
         default=5,
+        ge=1,
         description="Timeout in seconds for a single webhook delivery attempt"
     )
     alert_environment: str = Field(
@@ -111,31 +113,38 @@ class Settings(BaseSettings):
     )
     sync_stall_threshold: int = Field(
         default=3,
+        ge=1,
         description="Consecutive failed sync cycles before the loop is considered stalled"
     )
     node_unreachable_cycles: int = Field(
         default=3,
+        ge=1,
         description="Consecutive sync cycles the node may return no data (no last "
                     "finalized block, or no blocks for a non-empty range) before alerting"
     )
     lag_alert_blocks: int = Field(
         default=500,
+        ge=0,
         description="Lag depth (in blocks) that, held for lag_alert_cycles without net "
                     "progress, is treated as falling behind rather than a backlog being "
                     "worked through"
     )
     lag_alert_cycles: int = Field(
         default=60,
+        ge=2,
         description="Cycles of sustained lag deeper than lag_alert_blocks before alerting"
     )
     lag_recovery_ratio: float = Field(
         default=0.9,
+        gt=0,
+        le=1,
         description="Lag counts as recovering when the recent half of the window is at "
                     "most this fraction of the older half; a smaller value demands "
                     "faster catch-up before the alert is held back"
     )
     cursor_stuck_cycles: int = Field(
         default=3,
+        ge=1,
         description="Cycles the sync cursor may sit at the same height, retrying a "
                     "failing block, before that stops looking transient"
     )
@@ -173,6 +182,13 @@ class Settings(BaseSettings):
         default=None,
         description="Hasura admin secret (not used by indexer)"
     )
+
+    @model_validator(mode="after")
+    def _require_webhook_when_alerting(self) -> "Settings":
+        webhook = self.mattermost_webhook_url
+        if self.alerts_enabled and not (webhook and webhook.get_secret_value().strip()):
+            raise ValueError("ALERTS_ENABLED is true but MATTERMOST_WEBHOOK_URL is empty")
+        return self
 
     class Config:
         env_file = ".env"

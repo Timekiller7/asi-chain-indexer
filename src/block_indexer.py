@@ -13,7 +13,7 @@ import grpc
 import structlog
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import InterfaceError, OperationalError
 
 from src.addr import convert_to_asi_address, public_key_to_asi_address
 from src.alerts import AlertEvent, AlertKind, AlertService
@@ -35,12 +35,9 @@ def classify_failure(error: Exception) -> Optional[AlertKind]:
     Returns None when the failure is not a recognisable dependency outage, leaving
     it to the consecutive-failure counter.
     """
-    # aiohttp's connection errors are also OSError, so node checks must come first
     if isinstance(error, (grpc.RpcError, aiohttp.ClientError)):
         return AlertKind.NODE_UNREACHABLE
-    if isinstance(error, (asyncpg.PostgresError, SQLAlchemyError)):
-        return AlertKind.DATABASE_UNREACHABLE
-    if isinstance(error, OSError):
+    if isinstance(error, (asyncpg.PostgresError, OperationalError, InterfaceError)):
         return AlertKind.DATABASE_UNREACHABLE
     return None
 
