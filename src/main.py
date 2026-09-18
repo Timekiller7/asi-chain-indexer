@@ -2,16 +2,18 @@
 
 import asyncio
 import signal
+import sys
 from typing import Optional
 
 import click
 import structlog
 from dotenv import load_dotenv
 
-from src.alerts import AlertEvent, AlertKind, AlertService
+from src.alerts import AlertedError, AlertEvent, AlertKind, AlertService, describe_error
 from src.config import settings
 from src.monitoring import MonitoringServer
 from src.block_indexer import BlockIndexer
+from src.database import db
 
 # Load environment variables
 load_dotenv()
@@ -85,7 +87,9 @@ class IndexerService:
             console="http://localhost:8080/console"
         )
 
-        self.alerts = AlertService(settings)
+        # the database doubles as the throttle store, so a restart loop does not
+        # re-alert on every start
+        self.alerts = AlertService(settings, store=db)
 
         self.indexer = BlockIndexer(alerts=self.alerts)
 
@@ -115,6 +119,14 @@ class IndexerService:
         except Exception:
             pass  # already reported by _alert_if_indexer_died
 
+        if self.:
+            # non-zero exit, so the container's restart policy treats it as a crash;
+            # AlertedError keeps main() from sending INDEXER_STOPPED a second time
+            error = self._task_error(indexer_task)
+            raise AlertedError(
+                describe_error(error) if error else "sync loop exited"
+            ) from error
+
     def _on_indexer_task_done(self, task: asyncio.Task):
         """Notice a sync loop that ended on its own.
 
@@ -133,14 +145,23 @@ class IndexerService:
         if not self._indexer_died:
             return
 
-        error = None if task.cancelled() else task.exception()
+        error = self._task_error(task)
         logger.error("Indexer stopped unexpectedly", error=str(error) if error else None)
+        if isinstance(error, AlertedError):
+            return  # the cause has been alerted on already
+
         await self.alerts.notify_and_wait(
             AlertEvent(
                 AlertKind.INDEXER_STOPPED,
-                str(error) if error else "sync loop exited"
+                describe_error(error) if error else "sync loop exited"
             )
         )
+
+    @staticmethod
+    def _task_error(task: asyncio.Task) -> Optional[BaseException]:
+        if not task.done() or task.cancelled():
+            return None
+        return task.exception()
 
     async def stop(self):
         """Stop all services."""
@@ -193,12 +214,15 @@ def main(reset: bool, start_from: Optional[int]):
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
         sys.exit(0)
+    except AlertedError as e:
+        logger.error(f"Fatal error: {e}")
+        sys.exit(1)
     except Exception as e:
         logger.error(f"Fatal error: {e}")
         # the loop that ran the service is gone; a fresh one delivers the last word
         asyncio.run(
             AlertService(settings).notify_and_wait(
-                AlertEvent(AlertKind.INDEXER_STOPPED, str(e))
+                AlertEvent(AlertKind.INDEXER_STOPPED, describe_error(e))
             )
         )
         sys.exit(1)

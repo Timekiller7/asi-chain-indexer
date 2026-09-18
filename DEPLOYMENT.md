@@ -488,7 +488,7 @@ Detection thresholds are configurable per deployment, since what counts as
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SYNC_STALL_THRESHOLD` | `3` | Consecutive failed sync cycles before the loop is considered stalled |
+| `SYNC_STALL_THRESHOLD` | `3` | Consecutive failed sync cycles before alerting. The alert is named after the cause when it is recognisable (node or database unreachable), and is "Sync stalled" otherwise |
 | `NODE_UNREACHABLE_CYCLES` | `3` | Consecutive sync cycles the node may return no data (no last finalized block, or no blocks for a non-empty range) before alerting that it is unreachable |
 | `LAG_ALERT_BLOCKS` | `500` | Lag depth (in blocks) that counts as falling behind, not a backlog being worked through |
 | `LAG_ALERT_CYCLES` | `60` | Cycles the lag must stay deeper than `LAG_ALERT_BLOCKS` without shrinking before alerting |
@@ -496,7 +496,35 @@ Detection thresholds are configurable per deployment, since what counts as
 | `CURSOR_STUCK_CYCLES` | `3` | Cycles the sync cursor may retry the same block before that stops looking transient |
 
 See `.env.example` for the full list of alert-related variables, including
-`ALERT_THROTTLE_SEC` and `ALERT_TIMEOUT_SEC`.
+`ALERT_THROTTLE_SEC`, `ALERT_TIMEOUT_SEC`, `ALERT_MAX_TEXT_LEN` and
+`ALERT_STORE_TIMEOUT_SEC`.
+
+The indexer refuses to start when `ALERTS_ENABLED=true` and
+`MATTERMOST_WEBHOOK_URL` is empty, or when a threshold is out of range.
+
+On the hosts, these values come from the untracked `.env` in the repository
+checkout. `deploy.sh` sources that file and docker-compose passes the values
+through, and CI does not write it. Add the alert variables to `.env` on each
+host by hand. `.env` is kept out of the image by `.dockerignore`, so the
+webhook URL never ends up baked into an image layer.
+
+#### Throttling across restarts
+
+The throttle window starts only after a delivery succeeds. If a delivery fails,
+the next occurrence of that alert kind retries it. Each kind's last delivery
+time is also stored in the `indexer_state` table, under keys named
+`alert_last_sent:<kind>`. A container stuck in a restart loop therefore still
+posts at most once per window, for example "Node unreachable" at every startup
+health check.
+
+That stored state is best-effort. If the database itself is unreachable, the
+indexer can neither read nor write it. In that case each restart starts with an
+empty throttle and can post again, once per restart. To silence a known outage,
+set `ALERTS_ENABLED=false` or stop the container.
+
+When the sync loop dies, the process exits with status 1 after a single
+"Indexer stopped" alert, or after no alert at all when the cause was already
+reported (for example, the node failing its startup health check).
 
 ## Backup and Recovery
 

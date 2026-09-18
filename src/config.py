@@ -107,6 +107,18 @@ class Settings(BaseSettings):
         ge=1,
         description="Timeout in seconds for a single webhook delivery attempt"
     )
+    alert_max_text_len: int = Field(
+        default=300,
+        ge=20,
+        description="Longest error or context value posted to the channel; longer "
+                    "text is cut off"
+    )
+    alert_store_timeout_sec: float = Field(
+        default=1.0,
+        gt=0,
+        description="Timeout in seconds for each read or write of the persisted "
+                    "throttle state, so a dead database never holds up an alert"
+    )
     alert_environment: str = Field(
         default="unknown",
         description="Environment label shown in the alert title, e.g. internal-dev or devnet"

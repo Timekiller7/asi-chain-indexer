@@ -2,7 +2,7 @@
 
 import asyncio
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Dict
 
 import asyncpg
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -10,6 +10,9 @@ from sqlalchemy.orm import sessionmaker
 
 from src.config import settings
 from src.models import Base
+
+# indexer_state keys holding each alert kind's last delivery time
+ALERT_STATE_PREFIX = "alert_last_sent:"
 
 
 class Database:
@@ -107,6 +110,31 @@ class Database:
         """
         async with self.pool.acquire() as conn:
             await conn.execute(query, str(block_number))
+
+    async def load_alert_last_sent(self) -> Dict[str, float]:
+        """Last delivery time (unix seconds) of each alert kind, keyed by kind."""
+        query = """
+            SELECT key, value
+            FROM indexer_state
+            WHERE starts_with(key, $1)
+        """
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(query, ALERT_STATE_PREFIX)
+        return {
+            row["key"][len(ALERT_STATE_PREFIX):]: float(row["value"]) for row in rows
+        }
+
+    async def save_alert_last_sent(self, kind: str, sent_at: float) -> None:
+        """Record when an alert kind was last delivered, so the throttle window
+        survives a restart."""
+        query = """
+            INSERT INTO indexer_state (key, value, updated_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (key) DO UPDATE
+            SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+        """
+        async with self.pool.acquire() as conn:
+            await conn.execute(query, ALERT_STATE_PREFIX + kind, str(sent_at))
 
 
 # Global database instance

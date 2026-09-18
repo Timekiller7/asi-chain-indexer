@@ -16,7 +16,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import InterfaceError, OperationalError
 
 from src.addr import convert_to_asi_address, public_key_to_asi_address
-from src.alerts import AlertEvent, AlertKind, AlertService
+from src.alerts import AlertedError, AlertEvent, AlertKind, AlertService, describe_error
 from src.config import settings
 from src.database import db
 from src.models import (
@@ -96,6 +96,7 @@ class BlockIndexer:
         self.alerts = alerts if alerts is not None else AlertService.disabled()
         self._consecutive_failures = 0
         self._cycle_error: Optional[Exception] = None
+        self._cycle_kind: Optional[AlertKind] = None
         self._node_unavailable_cycles = 0
         self._lag_history: List[int] = []
         self._stuck_height: Optional[int] = None
@@ -129,7 +130,7 @@ class BlockIndexer:
                 AlertEvent(AlertKind.NODE_UNREACHABLE, "health check failed at startup")
                 .with_context("node", f"{settings.node_host}:{settings.grpc_port}")
             )
-            raise RuntimeError("Cannot connect to node")
+            raise AlertedError("Cannot connect to node")
 
         logger.info("✅ ASI-Chain node connection established")
 
@@ -142,6 +143,7 @@ class BlockIndexer:
         sync_cycles = 0
         while self.running:
             self._cycle_error = None
+            self._cycle_kind = None
             try:
                 await self._sync_blocks()
                 await self._sync_pending_deploys()
@@ -170,25 +172,22 @@ class BlockIndexer:
     def _record_cycle_failure(self, error: Exception):
         """Note a failed step of the current sync cycle.
 
-        A recognisable dependency outage is reported as itself right away. Anything
-        else is held until the end of the cycle, so a cycle that fails several steps
-        still counts as one failure against the stall threshold.
-
         Called from each step's own `except` rather than from the sync loop: every
         step swallows its exceptions, so nothing reaches the loop's handler.
         """
         kind = classify_failure(error)
-        if kind is not None:
-            event = AlertEvent(kind, str(error))
-            if kind is AlertKind.NODE_UNREACHABLE:
-                event.with_context("node", f"{settings.node_host}:{settings.grpc_port}")
-            self.alerts.notify(event)
+        if kind is None and self._cycle_kind is not None:
             return
-
         self._cycle_error = error
+        self._cycle_kind = kind
 
     def _close_cycle(self):
         """Count the cycle against the stall threshold and alert once it is reached.
+
+        A single failed cycle, even a dependency error, is often a blip that the
+        next cycle recovers from, so every kind waits for the same run of
+        consecutive failures. The alert is named after the outage behind the
+        latest cycle when there is one, and is a plain stall otherwise.
 
         Runs outside the loop's `try`, so it must never raise: an escaped exception
         here would kill the sync task.
@@ -202,9 +201,12 @@ class BlockIndexer:
             if self._consecutive_failures < settings.sync_stall_threshold:
                 return
 
+            kind = self._cycle_kind or AlertKind.SYNC_STALLED
+            event = AlertEvent(kind, describe_error(self._cycle_error))
+            if kind is AlertKind.NODE_UNREACHABLE:
+                event.with_context("node", f"{settings.node_host}:{settings.grpc_port}")
             self.alerts.notify(
-                AlertEvent(AlertKind.SYNC_STALLED, str(self._cycle_error))
-                .with_context("consecutive_failures", self._consecutive_failures)
+                event.with_context("consecutive_failures", self._consecutive_failures)
             )
         except Exception as e:
             logger.error("Failed to close sync cycle", error=str(e), exc_info=True)
@@ -395,7 +397,7 @@ class BlockIndexer:
                     progress.mark_failed(block_number)
                     logger.error(f"Failed to process block", error=str(e), block=block_summary)
                     skipped.append(block_number)
-                    last_skip_error = str(e)
+                    last_skip_error = describe_error(e)
 
             completed_height = progress.last_completed_height
             if completed_height >= start:
