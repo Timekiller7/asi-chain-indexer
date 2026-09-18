@@ -237,7 +237,6 @@ docker ps | grep asi-
 - **GraphQL Response Time**: <100ms for simple queries
 - **Database Performance**: 50,000+ reads/second
 - **Indexer Sync Rate**: 50 blocks per batch, 5 second intervals
-- **CLI Command Latency**: 10-50ms per command
 - **Memory Usage**: ~80MB (indexer) + ~50MB (database)
 - **Full Chain Sync**: 100 blocks in ~2 seconds
 - **Frontend Load Time**: <3 seconds initial load

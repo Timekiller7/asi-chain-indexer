@@ -25,7 +25,7 @@ The ASI-Chain indexer provides a powerful GraphQL API powered by Hasura, offerin
 - **JSONB Support**: Query into complex JSON fields like bonds_map and justifications
 - **Enhanced Transfer Detection**: Supports both variable-based and match-based Rholang patterns
 - **Data Quality**: Proper NULL handling for deployment error messages
-- **Validator Bond Detection**: Full support for new CLI output format
+- **Validator Bond Detection**: Bonds read directly from the node's gRPC API
 - **Pending Deploys**: Live snapshot of the node's deploy buffers (deploys not yet in a block), refreshed every sync cycle
 
 ## Access Details
@@ -950,7 +950,7 @@ If you need the deployment's own lifecycle status / error info, query `deploymen
 
 | Field | GraphQL type | Nullable | Source in node (proto) | Description |
 |---|---|---|---|---|
-| `status` | `String` | ❌ (default `"included"`) | `DeployInfo.status` — currently always `"included"` for in-block deploys (the gRPC client at `grpc_node_client.py:146` sets `"status": "included"`; node proto comment lists `pending/included/error`) | Deploy lifecycle status |
+| `status` | `String` | ❌ (default `"included"`) | `DeployInfo.status` — currently always `"included"` for in-block deploys (the gRPC node client sets `"status": "included"`; node proto comment lists `pending/included/error`) | Deploy lifecycle status |
 | `errored` | `Boolean` | ❌ (default `false`) | `DeployInfo.errored` (`protos/DeployServiceCommon.proto:144`) | Whether the deploy errored at execution |
 | `error_message` | `String` | ✅ | `DeployInfo.systemDeployError` (`protos/DeployServiceCommon.proto:145`) — indexer reads it via `deploy_data.get("systemDeployError")` (`block_indexer.py:349`) and normalises `""` → `NULL` | Error text, NULL when no error |
 | `deployment_type` | `String` | ✅ | Classified by the indexer from the Rholang term (`block_indexer.py`: `asi_transfer` / `validator_operation` / `smart_contract` / ...) | Classification of the deploy |

@@ -12,7 +12,7 @@ GraphQL URL: `http://localhost:8080/v1/graphql`
 - **GraphQL API**: Full Hasura integration with automatic relationship configuration
 - **10 Comprehensive Tables**: Complete blockchain data model
 - **Full Blockchain Sync**: Index from genesis (block 0) without limitations
-- **Validator Bond Detection**: Fixed regex pattern for new CLI output format
+- **Validator Bond Detection**: Bonds read directly from the node's gRPC API
 - **Data Quality**: Proper NULL handling for deployment error messages
 
 ## Data Model Overview
@@ -52,11 +52,16 @@ Readiness check that verifies all dependencies.
   "ready": true,
   "checks": {
     "database": true,
+    "node": true,
     "rchain_node": true
   },
   "timestamp": "2025-08-06T08:11:29.504095"
 }
 ```
+
+`rchain_node` is a deprecated alias of `node`, kept for one release so existing
+readiness consumers keep working; switch to `node`. `ready` and the HTTP status
+(200 / 503) are unaffected. Also served at `/readiness`.
 
 ### GET /status
 Detailed status information about the indexer.
@@ -533,7 +538,7 @@ See `GRAPHQL_GUIDE.md` for comprehensive examples.
 ## Changelog
 
 ### v2.1.1 (2025-09-09)
-- ✅ Fixed validator bond detection for new CLI output format
+- ✅ Fixed validator bond detection
 - ✅ Proper NULL handling for empty deployment error messages
 - ✅ Automatic Hasura relationship configuration
 - ✅ Zero-touch deployment with all fixes applied

@@ -550,8 +550,7 @@ indexer/
 ├── Environment Templates:
 │   ├── .env.example           # Reference with all options
 │   ├── .env.template          # Blank template
-│   ├── .env.remote-observer   # Remote observer node sample
-│   └── .env.rust              # Legacy
+│   └── .env.remote-observer   # Remote observer node sample
 ├── Documentation:
 │   ├── README.md                 # This file
 │   ├── API.md                    # REST API documentation

@@ -119,7 +119,7 @@ class IndexerService:
         except Exception:
             pass  # already reported by _alert_if_indexer_died
 
-        if self.:
+        if self._indexer_died:
             # non-zero exit, so the container's restart policy treats it as a crash;
             # AlertedError keeps main() from sending INDEXER_STOPPED a second time
             error = self._task_error(indexer_task)

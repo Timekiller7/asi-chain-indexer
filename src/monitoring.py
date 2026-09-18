@@ -48,7 +48,7 @@ sync_duration = Histogram(
 
 node_request_duration = Histogram(
     "indexer_node_request_duration_seconds",
-    "Time taken for RChain node API requests",
+    "Time taken for node API requests",
     buckets=[0.1, 0.25, 0.5, 1, 2, 5]
 )
 

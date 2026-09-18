@@ -734,7 +734,7 @@ class BlockIndexer:
                 )
 
     async def _update_validator_states(self):
-        """Update validator states using bonds and active-validators commands."""
+        """Update validator states from the node's bonds (gRPC) and active validators (HTTP)."""
         try:
             # Get current bonds
             bonds_data = await self.client.get_bonds()
@@ -796,7 +796,7 @@ class BlockIndexer:
             # Get current block
             current_block = await db.get_last_indexed_block()
 
-            # Only check every 100 blocks to avoid too many CLI calls
+            # Only check every 100 blocks to avoid too many node requests
             if current_block - self.last_epoch_check_block < 100:
                 return
 
@@ -857,7 +857,7 @@ class BlockIndexer:
             self._record_cycle_failure(e)
 
     async def _update_network_stats(self):
-        """Update network statistics using network-consensus command."""
+        """Update network statistics from the node's consensus data (finalized block, bonds, active validators)."""
         try:
             # Only update every 50 blocks
             current_block = await db.get_last_indexed_block()
