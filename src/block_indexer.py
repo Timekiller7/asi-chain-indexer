@@ -947,7 +947,6 @@ class BlockIndexer:
                     canonical.append((block_num, block_hash))
             if not canonical:
                 logger.debug("Main chain verification skipped, nothing indexed in range")
-                self._last_verified_block = current_block
                 return
 
             async with db.session() as session:

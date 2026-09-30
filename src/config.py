@@ -2,8 +2,10 @@
 
 from typing import Optional
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 
 class Settings(BaseSettings):
@@ -190,10 +192,19 @@ class Settings(BaseSettings):
     )
 
     # Hasura Configuration (optional, not used by indexer but may be in env)
-    hasura_admin_secret: Optional[str] = Field(
+    hasura_admin_secret: Optional[SecretStr] = Field(
         default=None,
         description="Hasura admin secret (not used by indexer)"
     )
+
+    @field_validator("database_url")
+    @classmethod
+    def _check_database_url(cls, value: str) -> str:
+        try:
+            make_url(value)
+        except ArgumentError:
+            raise ValueError("DATABASE_URL is not a valid database URL") from None
+        return value
 
     @model_validator(mode="after")
     def _require_webhook_when_alerting(self) -> "Settings":
@@ -206,6 +217,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         case_sensitive = False
         extra = "allow"  # allow extra fields in .env
+        hide_input_in_errors = True
 
 
 # Global settings instance

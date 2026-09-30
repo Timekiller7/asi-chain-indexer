@@ -191,7 +191,9 @@ class AlertService:
         except asyncio.TimeoutError:
             logger.warning("Alert delivery timed out", kind=event.kind.value)
         except Exception as e:
-            logger.warning("Alert delivery failed", kind=event.kind.value, error=str(e))
+            logger.warning(
+                "Alert delivery failed", kind=event.kind.value, error_type=type(e).__name__
+            )
 
     async def _process(self, event: AlertEvent) -> None:
         """Deliver unless throttled. The throttle window only starts on a delivery
@@ -289,5 +291,5 @@ class AlertService:
         except asyncio.TimeoutError:
             logger.warning("Alert delivery timed out")
         except Exception as e:
-            logger.warning("Alert delivery failed", error=str(e))
+            logger.warning("Alert delivery failed", error_type=type(e).__name__)
         return False
