@@ -13,7 +13,7 @@ from src.alerts import AlertedError, AlertEvent, AlertKind, AlertService, descri
 from src.config import settings
 from src.monitoring import MonitoringServer
 from src.block_indexer import BlockIndexer
-from src.database import db
+from src.database import AlertThrottleStore, db
 
 # Load environment variables
 load_dotenv()
@@ -87,9 +87,9 @@ class IndexerService:
             console="http://localhost:8080/console"
         )
 
-        # the database doubles as the throttle store, so a restart loop does not
+        # the throttle state is kept in the database, so a restart loop does not
         # re-alert on every start
-        self.alerts = AlertService(settings, store=db)
+        self.alerts = AlertService(settings, store=AlertThrottleStore())
 
         self.indexer = BlockIndexer(alerts=self.alerts)
 
@@ -219,12 +219,8 @@ def main(reset: bool, start_from: Optional[int]):
         sys.exit(1)
     except Exception as e:
         logger.error(f"Fatal error: {e}")
-        # the loop that ran the service is gone; a fresh one delivers the last word.
-        # Same throttle store as the service, so a crash loop is throttled here too;
-        # store calls are bounded and best-effort, so a dead database cannot hold
-        # up the exit
         asyncio.run(
-            AlertService(settings, store=db).notify_and_wait(
+            AlertService(settings, store=AlertThrottleStore()).notify_and_wait(
                 AlertEvent(AlertKind.INDEXER_STOPPED, describe_error(e))
             )
         )

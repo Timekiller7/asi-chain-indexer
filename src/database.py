@@ -111,6 +111,22 @@ class Database:
         async with self.pool.acquire() as conn:
             await conn.execute(query, str(block_number))
 
+
+class AlertThrottleStore:
+    """Keeps each alert kind's last delivery time in indexer_state, so the
+    throttle window survives a restart.
+
+    Each call opens its own short-lived connection rather than borrowing from
+    db.pool: the fatal exit path runs in a fresh event loop, where db.pool is
+    either not created yet or bound to the closed loop, and a pool held up by
+    stuck queries would otherwise delay the very alert that reports them.
+    """
+
+    def __init__(self, database_url: str = None):
+        self.dsn = (database_url or str(settings.database_url)).replace(
+            "postgresql+asyncpg://", "postgresql://"
+        )
+
     async def load_alert_last_sent(self) -> Dict[str, float]:
         """Last delivery time (unix seconds) of each alert kind, keyed by kind."""
         query = """
@@ -118,23 +134,28 @@ class Database:
             FROM indexer_state
             WHERE starts_with(key, $1)
         """
-        async with self.pool.acquire() as conn:
+        conn = await asyncpg.connect(self.dsn)
+        try:
             rows = await conn.fetch(query, ALERT_STATE_PREFIX)
+        finally:
+            await conn.close()
         return {
             row["key"][len(ALERT_STATE_PREFIX):]: float(row["value"]) for row in rows
         }
 
     async def save_alert_last_sent(self, kind: str, sent_at: float) -> None:
-        """Record when an alert kind was last delivered, so the throttle window
-        survives a restart."""
+        """Record when an alert kind was last delivered."""
         query = """
             INSERT INTO indexer_state (key, value, updated_at)
             VALUES ($1, $2, NOW())
             ON CONFLICT (key) DO UPDATE
             SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
         """
-        async with self.pool.acquire() as conn:
+        conn = await asyncpg.connect(self.dsn)
+        try:
             await conn.execute(query, ALERT_STATE_PREFIX + kind, str(sent_at))
+        finally:
+            await conn.close()
 
 
 # Global database instance
